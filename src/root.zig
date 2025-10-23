@@ -40,30 +40,38 @@ const Token = enum {
     @"if",
     @"else",
     @"return",
+    undefined,
     class,
     className,
     new,
 };
-
-const Scope = struct {
-    type: enum {
-        function,
-        local,
-    },
-    name: []const u8,
-    parent: *Scope,
-    variables: std.ArrayList(Variable),
-    children: std.ArrayList(*Scope),
-};
+/// `Scope(null) => local Scope w/ global Scope as parent`
+///
+/// `Scope(false) => local Scope w/ local Scope as parent`
+///
+/// `Scope(true) => global Scope`
+fn Scope(comptime global: ?bool) type {
+    if (global == null or !global.?) return struct {
+        type: enum {
+            function,
+            local,
+        },
+        name: []const u8,
+        parent: if (global == null) *Scope(true) else *Scope(false),
+        variables: std.ArrayList(Variable),
+        children: std.ArrayList(*Scope(false)),
+    } else return struct {
+        variables: std.ArrayList(Variable),
+        children: std.ArrayList(*Scope(false)),
+    };
+}
 const Variable = struct {
     name: []const u8,
     value: union(enum) {
-        integer: i64,
-        float: f64,
-        string: []const u8,
-        boolean: bool,
+        Int: i32,
+        str: []const u8,
+        bool: bool,
         array: []const u8,
-        object: []const u8,
         undefined,
     },
 };
@@ -73,6 +81,38 @@ const Function = struct {
     parameters: []const Variable,
     body: []const u8,
 };
+pub fn handleVariableDecl(
+    comptime global: ?bool,
+    scope: *Scope(global),
+    inputIterator: *std.mem.SplitIterator(u8, std.mem.DelimiterType.any),
+    declBegin: Token,
+    alloc: std.mem.Allocator,
+) !void {
+    _ = declBegin;
+    while (std.meta.stringToEnum(Token, inputIterator.peek().?) != null) {
+        _ = inputIterator.next();
+    }
+    print("\n\n\nNAME!!! {s}\n\n\n\n", .{inputIterator.peek().?});
+    var variable = Variable{
+        .name = inputIterator.next().?,
+        .value = undefined,
+    };
+    defer scope.variables.append(alloc, variable) catch unreachable;
+    if (std.meta.stringToEnum(Token, inputIterator.peek().?) == .@"=") _ = inputIterator.next() else @panic("Expected `=` after variable declaration!");
+    const decl = inputIterator.next().?;
+    switch (decl[0]) {
+        '0'...'9', '-' => {
+            variable.value = .{ .Int = std.fmt.parseInt(i32, std.mem.trim(u8, decl, "! "), 10) catch @panic("failed to parse Int!") };
+        },
+        '\'', '"' => {
+            variable.value = .{ .str = decl[1..decl.len] };
+        },
+        else => {},
+    }
+    print("\n{s} \n", .{inputIterator.peek().?});
+    for (scope.variables.items) |v|
+        print("\n \n -- \n Variable: \n name: {s}, \n value: {any} \n\n--", .{ v.name, v.value });
+}
 
 pub fn interpret(source: []const u8) !void {
     const allocator = std.heap.page_allocator;
@@ -80,12 +120,10 @@ pub fn interpret(source: []const u8) !void {
     defer arenaAllocator.deinit();
     const arena = arenaAllocator.allocator();
     var inputIterator = std.mem.splitAny(u8, source, "() \t\n\r");
-    const globalScope = .{
-        .variables = std.ArrayList(Variable),
-        .children = std.ArrayList(*Scope),
+    var globalScope = Scope(true){
+        .variables = .{},
+        .children = .{},
     };
-
-    std.debug.print("Global Scope: {any}\n", .{globalScope});
 
     while (inputIterator.next()) |input| {
         const tokenEnum = std.meta.stringToEnum(Token, input) orelse continue;
@@ -101,7 +139,6 @@ pub fn interpret(source: []const u8) !void {
                     try args.append(arena, .{ .name = argName, .value = .undefined });
                 }
                 const iterIdx = inputIterator.index orelse continue;
-                //    _ = inputIterator.next(); // progress 1 to get beyond the first '{'
                 var fnScopeEndIdx: usize = undefined;
                 var scopes: i32 = 0;
                 while (inputIterator.next()) |str_| {
@@ -122,6 +159,7 @@ pub fn interpret(source: []const u8) !void {
                 };
                 std.debug.print("Function: \n FnName: {s}\n Params: {any} \n Body: {s} \n ---- \n", .{ function.name, function.parameters, function.body });
             },
+            .@"const", .@"var" => try handleVariableDecl(true, &globalScope, &inputIterator, tokenEnum, arena),
             else => {},
         }
     }
