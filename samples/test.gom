@@ -1,5 +1,5 @@
 fn fillArr(l, n) => {
-   when( l.length < n ) { 
+   when( l.len < n ) { 
       l.push(0)!
    }
 }
@@ -7,7 +7,7 @@ fn fillArr(l, n) => {
 fn dispArr(l) => {
    var var outString = "  "!
    var var i = -1!
-   when (i < l.length-1) {
+   when (i < l.len-1) {
       var var replString = "  "!
       if (l[i]) {
          replString = "##"!
@@ -42,6 +42,7 @@ fn applyCA(l) => {
 const const N = 50!
 var var l = []!
 var var counter = 0!
+const const = myStr = "Heyyyyyy!!"!
 fillArr(l, N)!
 dispArr(l)!
 l[N / 2] = 1!
