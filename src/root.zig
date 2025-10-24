@@ -1,6 +1,7 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 const print = std.debug.print;
+const Errors = @import("errors.zig");
 
 const Token = enum {
     function,
@@ -65,8 +66,16 @@ fn Scope(comptime global: ?bool) type {
         children: std.ArrayList(*Scope(false)),
     };
 }
+const VarType = enum {
+    const_const,
+    const_var,
+    var_var,
+    var_const,
+};
+
 const Variable = struct {
     name: []const u8,
+    type: VarType,
     value: union(enum) {
         Int: i32,
         str: []const u8,
@@ -81,6 +90,7 @@ const Function = struct {
     parameters: []const Variable,
     body: []const u8,
 };
+
 pub fn handleVariableDecl(
     comptime global: ?bool,
     scope: *Scope(global),
@@ -88,13 +98,16 @@ pub fn handleVariableDecl(
     declBegin: Token,
     alloc: std.mem.Allocator,
 ) !void {
-    _ = declBegin;
+    const declEnd = std.meta.stringToEnum(Token, inputIterator.peek().?) orelse @panic(Errors.invalidVarDecl);
+    const varType: VarType = if (declBegin == .@"const" and declEnd == .@"const") .const_const else if (declBegin == .@"const" and declEnd == .@"var") .const_var else if (declBegin == .@"var" and declEnd == .@"const") .var_const else if (declBegin == .@"var" and declEnd == .@"var") .var_var else @panic(Errors.invalidVarDecl);
+
     while (std.meta.stringToEnum(Token, inputIterator.peek().?) != null) {
         _ = inputIterator.next();
     }
     print("\n\n\nNAME!!! {s}\n\n\n\n", .{inputIterator.peek().?});
     var variable = Variable{
         .name = inputIterator.next().?,
+        .type = varType,
         .value = undefined,
     };
     defer scope.variables.append(alloc, variable) catch unreachable;
@@ -105,13 +118,11 @@ pub fn handleVariableDecl(
             variable.value = .{ .Int = std.fmt.parseInt(i32, std.mem.trim(u8, decl, "! "), 10) catch @panic("failed to parse Int!") };
         },
         '\'', '"' => {
-            variable.value = .{ .str = decl[1..decl.len] };
+            variable.value = .{ .str = decl[1 .. decl.len - 2] };
         },
         else => {},
     }
     print("\n{s} \n", .{inputIterator.peek().?});
-    for (scope.variables.items) |v|
-        print("\n \n -- \n Variable: \n name: {s}, \n value: {any} \n\n--", .{ v.name, v.value });
 }
 
 pub fn interpret(source: []const u8) !void {
@@ -124,7 +135,13 @@ pub fn interpret(source: []const u8) !void {
         .variables = .{},
         .children = .{},
     };
-
+    defer {
+        print("---\nAll the variables: \n", .{});
+        for (globalScope.variables.items) |v| {
+            print("\n \n -- \n Variable: \n name: {s}, \n value: {any} (Value(string): {s}) \n type: {any} \n\n--", .{ v.name, v.value, if (v.value == .str) v.value.str else "N/A", v.type });
+        }
+        print("\nAll Varibles printed\n ---", .{});
+    }
     while (inputIterator.next()) |input| {
         const tokenEnum = std.meta.stringToEnum(Token, input) orelse continue;
 
@@ -136,7 +153,7 @@ pub fn interpret(source: []const u8) !void {
                 const fnName = inputIterator.next() orelse continue;
                 while (std.meta.stringToEnum(Token, inputIterator.peek() orelse continue) != .@"{") {
                     const argName = inputIterator.next().?;
-                    try args.append(arena, .{ .name = argName, .value = .undefined });
+                    try args.append(arena, .{ .name = argName, .value = .undefined, .type = .const_const });
                 }
                 const iterIdx = inputIterator.index orelse continue;
                 var fnScopeEndIdx: usize = undefined;
