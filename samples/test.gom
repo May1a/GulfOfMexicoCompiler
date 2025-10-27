@@ -41,7 +41,7 @@ fn applyCA(l) => {
 
 const const N = 50!
 var var l = []!
-var var counter = 0!
+var var counter = 0 - 1!
 const const = myStr = "Heyyyyyy!!"!
 fillArr(l, N)!
 dispArr(l)!
