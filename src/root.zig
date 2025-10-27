@@ -115,7 +115,26 @@ pub fn handleVariableDecl(
     const decl = inputIterator.next().?;
     switch (decl[0]) {
         '0'...'9', '-' => {
-            variable.value = .{ .Int = std.fmt.parseInt(i32, std.mem.trim(u8, decl, "! "), 10) catch @panic("failed to parse Int!") };
+            const nextToken = inputIterator.peek().?[0];
+            // const declLastElement = decl[decl.len];
+            if (nextToken == '-' or nextToken == '+') {
+                _ = inputIterator.next();
+                print("{s}", .{inputIterator.peek().?});
+                const nextIn = inputIterator.next().?;
+
+                const secondNum = std.fmt.parseInt(i32, nextIn[0 .. nextIn.len - 1], 10) catch |err| {
+                    print("could not parse num with error: {any}", .{err});
+                    @panic("");
+                };
+                const firstNum = std.fmt.parseInt(i32, decl, 10) catch |err| {
+                    print("could not parse num with error: {any}", .{err});
+                    @panic("");
+                };
+                const num = if (nextToken == '-') firstNum - secondNum else firstNum + secondNum;
+                variable.value = .{ .Int = num };
+            } else {
+                variable.value = .{ .Int = std.fmt.parseInt(i32, std.mem.trim(u8, decl, "! "), 10) catch @panic("failed to parse Int!") };
+            }
         },
         '\'', '"' => {
             variable.value = .{ .str = decl[1 .. decl.len - 2] };
@@ -135,8 +154,8 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
         .variables = .{},
         .children = .{},
     };
-    if (dbg) {
-        defer {
+    defer {
+        if (dbg) {
             print("---\nAll the variables: \n", .{});
             for (globalScope.variables.items) |v| {
                 print("\n \n -- \n Variable: \n name: {s}, \n value: {any} (Value(string): {s}) \n type: {any} \n\n--", .{ v.name, v.value, if (v.value == .str) v.value.str else "N/A", v.type });
