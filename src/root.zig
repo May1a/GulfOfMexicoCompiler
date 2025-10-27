@@ -125,7 +125,7 @@ pub fn handleVariableDecl(
     print("\n{s} \n", .{inputIterator.peek().?});
 }
 
-pub fn interpret(source: []const u8) !void {
+pub fn interpret(source: []const u8, comptime dbg: bool) !void {
     const allocator = std.heap.page_allocator;
     var arenaAllocator = std.heap.ArenaAllocator.init(allocator);
     defer arenaAllocator.deinit();
@@ -135,12 +135,14 @@ pub fn interpret(source: []const u8) !void {
         .variables = .{},
         .children = .{},
     };
-    defer {
-        print("---\nAll the variables: \n", .{});
-        for (globalScope.variables.items) |v| {
-            print("\n \n -- \n Variable: \n name: {s}, \n value: {any} (Value(string): {s}) \n type: {any} \n\n--", .{ v.name, v.value, if (v.value == .str) v.value.str else "N/A", v.type });
+    if (dbg) {
+        defer {
+            print("---\nAll the variables: \n", .{});
+            for (globalScope.variables.items) |v| {
+                print("\n \n -- \n Variable: \n name: {s}, \n value: {any} (Value(string): {s}) \n type: {any} \n\n--", .{ v.name, v.value, if (v.value == .str) v.value.str else "N/A", v.type });
+            }
+            print("\nAll Varibles printed\n ---", .{});
         }
-        print("\nAll Varibles printed\n ---", .{});
     }
     while (inputIterator.next()) |input| {
         const tokenEnum = std.meta.stringToEnum(Token, input) orelse continue;
@@ -174,7 +176,8 @@ pub fn interpret(source: []const u8) !void {
                     .parameters = args.items,
                     .body = inputIterator.buffer[iterIdx..inputIterator.index.?],
                 };
-                std.debug.print("Function: \n FnName: {s}\n Params: {any} \n Body: {s} \n ---- \n", .{ function.name, function.parameters, function.body });
+                if (dbg)
+                    std.debug.print("Function: \n FnName: {s}\n Params: {any} \n Body: {s} \n ---- \n", .{ function.name, function.parameters, function.body });
             },
             .@"const", .@"var" => try handleVariableDecl(true, &globalScope, &inputIterator, tokenEnum, arena),
             else => {},
@@ -188,5 +191,5 @@ test "reading sample file and running it through the interpreter" {
     var buffer: [1024]u8 = undefined;
     const n = try f.read(&buffer);
     std.debug.print("Contents: {s}\n", .{buffer[0..n]});
-    try interpret(buffer[0..n]);
+    try interpret(buffer[0..n], true);
 }

@@ -7,7 +7,7 @@ pub fn main() !void {
     var buffer: [1024]u8 = undefined;
     const n = try f.read(&buffer);
     std.debug.print("Contents: {s}\n", .{buffer[0..n]});
-    try zGoM.interpret(buffer[0..n]);
+    try zGoM.interpret(buffer[0..n], true);
 }
 
 test "simple test" {
