@@ -147,7 +147,7 @@ pub fn handleVariableDecl(
         .value = undefined,
     };
     defer scope.variables.append(alloc, variable) catch unreachable;
-    if (std.meta.stringToEnum(Token, inputIterator.peek().?) == .@"=") _ = inputIterator.next() else @panic("Expected `=` after variable declaration!");
+    if (inputIterator.peek().?[0] == '=') _ = inputIterator.next() else @panic("Expected `=` after variable declaration!");
     const decl = inputIterator.next().?;
     switch (decl[0]) {
         '0'...'9', '-' => {
