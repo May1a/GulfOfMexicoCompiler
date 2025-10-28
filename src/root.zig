@@ -3,6 +3,8 @@ const std = @import("std");
 const print = std.debug.print;
 const Errors = @import("errors.zig");
 
+const Allocator = std.mem.Allocator;
+
 const Token = enum {
     function,
     @"fn",
@@ -46,32 +48,23 @@ const Token = enum {
     className,
     new,
 };
-/// `Scope(null) => local Scope w/ global Scope as parent`
-///
-/// `Scope(false) => local Scope w/ local Scope as parent`
-///
-/// `Scope(true) => global Scope`
-fn Scope(comptime global: ?bool) type {
-    if (global == null or !global.?) return struct {
-        type: enum {
-            function,
-            local,
-        },
-        name: []const u8,
-        parent: if (global == null) *Scope(true) else *Scope(false),
-        variables: std.StringArrayHashMap(Variable),
-        children: std.ArrayList(*Scope(false)),
-    } else return struct {
-        variables: std.StringArrayHashMap(Variable),
-        children: std.ArrayList(*Scope(false)),
-    };
-}
+
+const Scope = struct {
+    functions: std.StringArrayHashMap(Function),
+    variables: std.StringArrayHashMap(Variable),
+    arena: Allocator,
+};
+
+const ScopeStack = std.ArrayList(*Scope);
+
 const VarType = enum {
     const_const,
     const_var,
     var_var,
     var_const,
 };
+
+const TokenIter = std.mem.TokenIterator(u8, std.mem.DelimiterType.any);
 
 const Variable = struct {
     name: []const u8,
@@ -129,13 +122,12 @@ test "Math Ops" {
 }
 
 pub fn handleVariableDecl(
-    comptime global: ?bool,
-    scope: *Scope(global),
-    inputIterator: *std.mem.TokenIterator(u8, std.mem.DelimiterType.any),
+    scopeStack: *ScopeStack,
+    inputIterator: *TokenIter,
     declBegin: Token,
-    alloc: std.mem.Allocator,
+    alloc: Allocator,
 ) !void {
-    const declEnd = std.meta.stringToEnum(Token, inputIterator.peek().?) orelse @panic(Errors.invalidVarDecl);
+    const declEnd = std.meta.stringToEnum(Token, inputIterator.next().?) orelse @panic(Errors.invalidVarDecl);
     const varType: VarType = if (declBegin == .@"const" and declEnd == .@"const") .const_const else if (declBegin == .@"const" and declEnd == .@"var") .const_var else if (declBegin == .@"var" and declEnd == .@"const") .var_const else if (declBegin == .@"var" and declEnd == .@"var") .var_var else return error.invalidDecl;
 
     while (std.meta.stringToEnum(Token, inputIterator.peek().?) != null) {
@@ -146,7 +138,9 @@ pub fn handleVariableDecl(
         .type = varType,
         .value = undefined,
     };
-    defer scope.variables.put(variable.name, variable) catch unreachable;
+
+    var scope = scopeStack.items[scopeStack.items.len - 1];
+
     if (inputIterator.peek().?[0] == '=') _ = inputIterator.next() else @panic("Expected `=` after variable declaration!");
     const decl = inputIterator.next().?;
     switch (decl[0]) {
@@ -170,7 +164,7 @@ pub fn handleVariableDecl(
                             else => return error.notANumber,
                         };
                     }
-                    const lastToken = inputIterator.next().?;
+                    const lastToken = inputIterator.peek().?;
                     const lastNum = try std.fmt.parseInt(i32, lastToken[0 .. lastToken.len - 1], 10);
                     try nums.append(alloc, lastNum);
                     const variableValue = handleMathOp(ops.items, nums.items);
@@ -183,10 +177,16 @@ pub fn handleVariableDecl(
             }
         },
         '\'', '"' => {
+            print(" \n STRING0 {s} \n", .{decl});
+            print(" \n STRING1 {s} \n", .{inputIterator.peek().?});
+            //     _ = inputIterator.next();
+            print(" \n STRING2 {s} \n", .{inputIterator.peek().?});
             variable.value = .{ .str = decl[1 .. decl.len - 2] };
         },
         'a'...'z' => {
-            _ = inputIterator.next();
+            print(" \n REASS1 {s} \n", .{inputIterator.peek().?});
+            //  _ = inputIterator.next();
+            print(" \n REASS2 {s} \n", .{inputIterator.peek().?});
             const name = decl[0 .. decl.len - 1];
             if (scope.variables.get(name)) |v| {
                 variable.value = v.value;
@@ -194,6 +194,7 @@ pub fn handleVariableDecl(
         },
         else => {},
     }
+    scope.variables.put(variable.name, variable) catch unreachable;
 }
 
 pub fn interpret(source: []const u8, comptime dbg: bool) !void {
@@ -202,16 +203,20 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
     defer arenaAllocator.deinit();
     const arena = arenaAllocator.allocator();
     var inputIterator = std.mem.tokenizeAny(u8, source, "() \t\n\r");
-    var globalScope = Scope(true){
+    var mScope = Scope{
         .variables = std.StringArrayHashMap(Variable).init(allocator),
-        .children = .{},
+        .functions = std.StringArrayHashMap(Function).init(allocator),
+        .arena = arena,
     };
+    var scopeStack = try ScopeStack.initCapacity(arena, 1);
+    try scopeStack.insert(arena, 0, &mScope);
     defer {
         if (dbg) {
             print("---\nAll the variables: \n", .{});
-            for (globalScope.variables.values()) |v| {
-                print("\n \n -- \n Variable: \n name: {s}, \n value: {any} (Value(string): {s}) \n type: {any} \n\n--", .{ v.name, v.value, if (v.value == .str) v.value.str else "N/A", v.type });
-            }
+            for (scopeStack.items) |scope|
+                for (scope.variables.values()) |v| {
+                    print("\n \n -- \n Variable: \n name: {s}, \n value: {any} (Value(string): {s}) \n type: {any} \n\n--", .{ v.name, v.value, if (v.value == .str) v.value.str else "N/A", v.type });
+                };
             print("\nAll Varibles printed\n ---", .{});
         }
     }
@@ -246,7 +251,7 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
                 if (dbg)
                     std.log.info("Function: \n FnName: {s}\n Params: {any} \n Body: {s} \n ---- \n", .{ function.name, function.parameters, function.body });
             },
-            .@"const", .@"var" => try handleVariableDecl(true, &globalScope, &inputIterator, tokenEnum, arena),
+            .@"const", .@"var" => try handleVariableDecl(&scopeStack, &inputIterator, tokenEnum, arena),
             else => {},
         }
     }
@@ -255,7 +260,7 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
 test "reading sample file and running it through the interpreter" {
     const f = try std.fs.cwd().openFile("samples/test.gom", .{});
     defer f.close();
-    var buffer: [1024]u8 = undefined;
+    var buffer: [2048]u8 = undefined;
     const n = try f.read(&buffer);
     std.debug.print("Contents: {s}\n", .{buffer[0..n]});
     try interpret(buffer[0..n], true);
