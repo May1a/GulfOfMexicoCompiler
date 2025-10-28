@@ -91,20 +91,56 @@ const Function = struct {
     body: []const u8,
 };
 
+const MathOp = enum {
+    add,
+    sub,
+    div,
+    mult,
+    pub fn determine(char: u8) !MathOp {
+        return switch (char) {
+            '+' => .add,
+            '-' => .sub,
+            '*' => .mult,
+            '/' => .div,
+            else => error.invalidMathOp,
+        };
+    }
+};
+
+pub fn handleMathOp(mathOps: []MathOp, nums: []i32) i32 {
+    var result: i32 = nums[0];
+    for (mathOps, nums[1..]) |op, num| {
+        switch (op) {
+            .add => result += num,
+            .sub => result -= num,
+            .mult => result *= num,
+            .div => result = @divTrunc(result, num),
+        }
+    }
+    return result;
+}
+
+test "Math Ops" {
+    var ops = [_]MathOp{ .add, .sub };
+    var nums = [_]i32{ 1, 4, 5 };
+
+    const res = handleMathOp(&ops, &nums);
+    try std.testing.expect(res == (1 + 4 - 5));
+}
+
 pub fn handleVariableDecl(
     comptime global: ?bool,
     scope: *Scope(global),
-    inputIterator: *std.mem.SplitIterator(u8, std.mem.DelimiterType.any),
+    inputIterator: *std.mem.TokenIterator(u8, std.mem.DelimiterType.any),
     declBegin: Token,
     alloc: std.mem.Allocator,
 ) !void {
     const declEnd = std.meta.stringToEnum(Token, inputIterator.peek().?) orelse @panic(Errors.invalidVarDecl);
-    const varType: VarType = if (declBegin == .@"const" and declEnd == .@"const") .const_const else if (declBegin == .@"const" and declEnd == .@"var") .const_var else if (declBegin == .@"var" and declEnd == .@"const") .var_const else if (declBegin == .@"var" and declEnd == .@"var") .var_var else @panic(Errors.invalidVarDecl);
+    const varType: VarType = if (declBegin == .@"const" and declEnd == .@"const") .const_const else if (declBegin == .@"const" and declEnd == .@"var") .const_var else if (declBegin == .@"var" and declEnd == .@"const") .var_const else if (declBegin == .@"var" and declEnd == .@"var") .var_var else return error.invalidDecl;
 
     while (std.meta.stringToEnum(Token, inputIterator.peek().?) != null) {
         _ = inputIterator.next();
     }
-    print("\n\n\nNAME!!! {s}\n\n\n\n", .{inputIterator.peek().?});
     var variable = Variable{
         .name = inputIterator.next().?,
         .type = varType,
@@ -116,24 +152,34 @@ pub fn handleVariableDecl(
     switch (decl[0]) {
         '0'...'9', '-' => {
             const nextToken = inputIterator.peek().?[0];
-            // const declLastElement = decl[decl.len];
-            if (nextToken == '-' or nextToken == '+') {
-                _ = inputIterator.next();
-                print("{s}", .{inputIterator.peek().?});
-                const nextIn = inputIterator.next().?;
 
-                const secondNum = std.fmt.parseInt(i32, nextIn[0 .. nextIn.len - 1], 10) catch |err| {
-                    print("could not parse num with error: {any}", .{err});
-                    @panic("");
-                };
-                const firstNum = std.fmt.parseInt(i32, decl, 10) catch |err| {
-                    print("could not parse num with error: {any}", .{err});
-                    @panic("");
-                };
-                const num = if (nextToken == '-') firstNum - secondNum else firstNum + secondNum;
-                variable.value = .{ .Int = num };
-            } else {
-                variable.value = .{ .Int = std.fmt.parseInt(i32, std.mem.trim(u8, decl, "! "), 10) catch @panic("failed to parse Int!") };
+            switch (nextToken) {
+                '+', '-', '/', '*' => |op| {
+                    _ = inputIterator.next();
+                    const firstInt = try std.fmt.parseInt(i32, decl, 10);
+                    var ops = try std.ArrayList(MathOp).initCapacity(alloc, 1);
+                    try ops.insert(alloc, 0, try MathOp.determine(op));
+                    var nums = try std.ArrayList(i32).initCapacity(alloc, 1);
+                    try nums.insert(alloc, 0, firstInt);
+
+                    while (inputIterator.peek().?[inputIterator.peek().?.len - 1] != '!') {
+                        const next = inputIterator.next().?;
+                        try switch (next[0]) {
+                            '+', '-', '/', '*' => |char| ops.append(alloc, try MathOp.determine(char)),
+                            '0'...'9' => nums.append(alloc, try std.fmt.parseInt(i32, next, 10)),
+                            else => return error.notANumber,
+                        };
+                    }
+                    const lastToken = inputIterator.next().?;
+                    const lastNum = try std.fmt.parseInt(i32, lastToken[0 .. lastToken.len - 1], 10);
+                    try nums.append(alloc, lastNum);
+                    const variableValue = handleMathOp(ops.items, nums.items);
+
+                    variable.value = .{ .Int = variableValue };
+                },
+                else => {
+                    variable.value = .{ .Int = std.fmt.parseInt(i32, std.mem.trim(u8, decl, "! "), 10) catch @panic("failed to parse Int!") };
+                },
             }
         },
         '\'', '"' => {
@@ -149,7 +195,7 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
     var arenaAllocator = std.heap.ArenaAllocator.init(allocator);
     defer arenaAllocator.deinit();
     const arena = arenaAllocator.allocator();
-    var inputIterator = std.mem.splitAny(u8, source, "() \t\n\r");
+    var inputIterator = std.mem.tokenizeAny(u8, source, "() \t\n\r");
     var globalScope = Scope(true){
         .variables = .{},
         .children = .{},
@@ -176,7 +222,7 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
                     const argName = inputIterator.next().?;
                     try args.append(arena, .{ .name = argName, .value = .undefined, .type = .const_const });
                 }
-                const iterIdx = inputIterator.index orelse continue;
+                const iterIdx = inputIterator.index;
                 var fnScopeEndIdx: usize = undefined;
                 var scopes: i32 = 0;
                 while (inputIterator.next()) |str_| {
@@ -186,17 +232,17 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
                     if (token == .@"{") scopes += 1 else if (token == .@"}") scopes -= 1;
                     if (scopes < 0) @panic("Invalid syntax!");
                     if (scopes == 0) {
-                        fnScopeEndIdx = inputIterator.index.?;
+                        fnScopeEndIdx = inputIterator.index;
                         break;
                     }
                 }
                 const function = Function{
                     .name = fnName,
                     .parameters = args.items,
-                    .body = inputIterator.buffer[iterIdx..inputIterator.index.?],
+                    .body = inputIterator.buffer[iterIdx..inputIterator.index],
                 };
                 if (dbg)
-                    std.debug.print("Function: \n FnName: {s}\n Params: {any} \n Body: {s} \n ---- \n", .{ function.name, function.parameters, function.body });
+                    std.log.info("Function: \n FnName: {s}\n Params: {any} \n Body: {s} \n ---- \n", .{ function.name, function.parameters, function.body });
             },
             .@"const", .@"var" => try handleVariableDecl(true, &globalScope, &inputIterator, tokenEnum, arena),
             else => {},
