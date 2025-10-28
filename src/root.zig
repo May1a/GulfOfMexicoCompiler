@@ -59,10 +59,10 @@ fn Scope(comptime global: ?bool) type {
         },
         name: []const u8,
         parent: if (global == null) *Scope(true) else *Scope(false),
-        variables: std.ArrayList(Variable),
+        variables: std.StringArrayHashMap(Variable),
         children: std.ArrayList(*Scope(false)),
     } else return struct {
-        variables: std.ArrayList(Variable),
+        variables: std.StringArrayHashMap(Variable),
         children: std.ArrayList(*Scope(false)),
     };
 }
@@ -146,7 +146,7 @@ pub fn handleVariableDecl(
         .type = varType,
         .value = undefined,
     };
-    defer scope.variables.append(alloc, variable) catch unreachable;
+    defer scope.variables.put(variable.name, variable) catch unreachable;
     if (inputIterator.peek().?[0] == '=') _ = inputIterator.next() else @panic("Expected `=` after variable declaration!");
     const decl = inputIterator.next().?;
     switch (decl[0]) {
@@ -185,6 +185,13 @@ pub fn handleVariableDecl(
         '\'', '"' => {
             variable.value = .{ .str = decl[1 .. decl.len - 2] };
         },
+        'a'...'z' => {
+            _ = inputIterator.next();
+            const name = decl[0 .. decl.len - 1];
+            if (scope.variables.get(name)) |v| {
+                variable.value = v.value;
+            }
+        },
         else => {},
     }
 }
@@ -196,13 +203,13 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
     const arena = arenaAllocator.allocator();
     var inputIterator = std.mem.tokenizeAny(u8, source, "() \t\n\r");
     var globalScope = Scope(true){
-        .variables = .{},
+        .variables = std.StringArrayHashMap(Variable).init(allocator),
         .children = .{},
     };
     defer {
         if (dbg) {
             print("---\nAll the variables: \n", .{});
-            for (globalScope.variables.items) |v| {
+            for (globalScope.variables.values()) |v| {
                 print("\n \n -- \n Variable: \n name: {s}, \n value: {any} (Value(string): {s}) \n type: {any} \n\n--", .{ v.name, v.value, if (v.value == .str) v.value.str else "N/A", v.type });
             }
             print("\nAll Varibles printed\n ---", .{});
