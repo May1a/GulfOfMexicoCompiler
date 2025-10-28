@@ -40,10 +40,10 @@ fn applyCA(l) => {
 }
 
 const const N = 50!
-var var l = []!
 var var counter = 0 - 1 + 1 + 1 + 1!
 const const counter2 = counter!
 const const myStr = "Heyyyyyy!!"!
+const const myStr2 = "hey"!
 
 fillArr(l, N)!
 dispArr(l)!
