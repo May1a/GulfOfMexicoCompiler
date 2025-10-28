@@ -178,7 +178,7 @@ pub fn handleVariableDecl(
                     variable.value = .{ .Int = variableValue };
                 },
                 else => {
-                    variable.value = .{ .Int = std.fmt.parseInt(i32, std.mem.trim(u8, decl, "! "), 10) catch @panic("failed to parse Int!") };
+                    variable.value = .{ .Int = std.fmt.parseInt(i32, decl[0 .. decl.len - 1], 10) catch @panic("failed to parse Int!") };
                 },
             }
         },
@@ -187,7 +187,6 @@ pub fn handleVariableDecl(
         },
         else => {},
     }
-    print("\n{s} \n", .{inputIterator.peek().?});
 }
 
 pub fn interpret(source: []const u8, comptime dbg: bool) !void {
@@ -212,24 +211,20 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
     while (inputIterator.next()) |input| {
         const tokenEnum = std.meta.stringToEnum(Token, input) orelse continue;
 
-        std.debug.print("Token: {any}\n", .{tokenEnum});
-
         switch (tokenEnum) {
             .function, .@"fn" => {
                 var args = try std.ArrayList(Variable).initCapacity(arena, 10);
                 const fnName = inputIterator.next() orelse continue;
-                while (std.meta.stringToEnum(Token, inputIterator.peek() orelse continue) != .@"{") {
+                while ((inputIterator.peek() orelse continue)[0] != '{') {
                     const argName = inputIterator.next().?;
                     try args.append(arena, .{ .name = argName, .value = .undefined, .type = .const_const });
                 }
                 const iterIdx = inputIterator.index;
                 var fnScopeEndIdx: usize = undefined;
                 var scopes: i32 = 0;
-                while (inputIterator.next()) |str_| {
-                    const str = std.mem.trim(u8, str_, " ");
-                    const token = std.meta.stringToEnum(Token, str) orelse continue;
-                    print("{any}", .{token});
-                    if (token == .@"{") scopes += 1 else if (token == .@"}") scopes -= 1;
+                while (inputIterator.next()) |str| {
+                    const firstChar = str[0];
+                    if (firstChar == '{') scopes += 1 else if (firstChar == '}') scopes -= 1;
                     if (scopes < 0) @panic("Invalid syntax!");
                     if (scopes == 0) {
                         fnScopeEndIdx = inputIterator.index;
