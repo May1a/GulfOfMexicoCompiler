@@ -1,11 +1,10 @@
-//! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 const print = std.debug.print;
 const Errors = @import("errors.zig");
 
-const Allocator = std.mem.Allocator;
+pub const Allocator = std.mem.Allocator;
 
-const Token = enum {
+pub const Token = enum {
     function,
     @"fn",
     when,
@@ -49,24 +48,24 @@ const Token = enum {
     new,
 };
 
-const Scope = struct {
+pub const Scope = struct {
     functions: std.StringArrayHashMap(Function),
     variables: std.StringArrayHashMap(Variable),
     arena: Allocator,
 };
 
-const ScopeStack = std.ArrayList(*Scope);
+pub const ScopeStack = std.ArrayList(*Scope);
 
-const VarType = enum {
+pub const VarType = enum {
     const_const,
     const_var,
     var_var,
     var_const,
 };
 
-const TokenIter = std.mem.TokenIterator(u8, std.mem.DelimiterType.any);
+pub const TokenIter = std.mem.TokenIterator(u8, std.mem.DelimiterType.any);
 
-const Variable = struct {
+pub const Variable = struct {
     name: []const u8,
     type: VarType,
     value: union(enum) {
@@ -78,13 +77,13 @@ const Variable = struct {
     },
 };
 
-const Function = struct {
+pub const Function = struct {
     name: []const u8,
-    parameters: []const Variable,
+    parameters: []Variable,
     body: []const u8,
 };
 
-const MathOp = enum {
+pub const MathOp = enum {
     add,
     sub,
     div,
@@ -177,16 +176,9 @@ pub fn handleVariableDecl(
             }
         },
         '\'', '"' => {
-            print(" \n STRING0 {s} \n", .{decl});
-            print(" \n STRING1 {s} \n", .{inputIterator.peek().?});
-            //     _ = inputIterator.next();
-            print(" \n STRING2 {s} \n", .{inputIterator.peek().?});
             variable.value = .{ .str = decl[1 .. decl.len - 2] };
         },
         'a'...'z' => {
-            print(" \n REASS1 {s} \n", .{inputIterator.peek().?});
-            //  _ = inputIterator.next();
-            print(" \n REASS2 {s} \n", .{inputIterator.peek().?});
             const name = decl[0 .. decl.len - 1];
             if (scope.variables.get(name)) |v| {
                 variable.value = v.value;
@@ -202,7 +194,7 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
     var arenaAllocator = std.heap.ArenaAllocator.init(allocator);
     defer arenaAllocator.deinit();
     const arena = arenaAllocator.allocator();
-    var inputIterator = std.mem.tokenizeAny(u8, source, "() \t\n\r");
+    var inputIterator = std.mem.tokenizeAny(u8, source, "\n\r");
     var mScope = Scope{
         .variables = std.StringArrayHashMap(Variable).init(allocator),
         .functions = std.StringArrayHashMap(Function).init(allocator),
@@ -221,7 +213,8 @@ pub fn interpret(source: []const u8, comptime dbg: bool) !void {
         }
     }
     while (inputIterator.next()) |input| {
-        const tokenEnum = std.meta.stringToEnum(Token, input) orelse continue;
+        var lineIterator = std.mem.tokenizeAny(u8, input, "() \t\n\r");
+        const tokenEnum = std.meta.stringToEnum(Token, lineIterator.next().?) orelse continue;
 
         switch (tokenEnum) {
             .function, .@"fn" => {
