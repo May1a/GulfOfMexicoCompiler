@@ -65,16 +65,18 @@ pub const VarType = enum {
 
 pub const TokenIter = std.mem.TokenIterator(u8, std.mem.DelimiterType.any);
 
+pub const VariableValue = union(enum) {
+    Int: i32,
+    str: []const u8,
+    bool: bool,
+    array: []const u8,
+    undefined,
+};
+
 pub const Variable = struct {
     name: []const u8,
     type: VarType,
-    value: union(enum) {
-        Int: i32,
-        str: []const u8,
-        bool: bool,
-        array: []const u8,
-        undefined,
-    },
+    value: VariableValue,
 };
 
 pub const Function = struct {

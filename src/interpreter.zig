@@ -37,6 +37,46 @@ const Interpreter = struct {
         }
         return error.noEndInSight;
     }
+    pub fn determineIfIsFnAndRunIfItIs(exprStart: []const u8, interpreter: *Interpreter, tokenIter: *TokenIterator) void {
+        switch (exprStart[exprStart.len - 1]) {
+            'a'...'z', 'A'...'Z' => runFn(exprStart, interpreter, tokenIter),
+            else => return,
+        }
+    }
+    /// parses the variable declaration *after* the `=`
+    pub fn parseVarDecl(this: *@This(), decl: []const u8) root.VariableValue {
+        switch (decl[0]) {
+            '"' => {
+                const str = parseStr(decl) catch {
+                    @branchHint(.cold);
+                    std.log.err("Error on line: {d} - Could not parse string literal.\n", .{this.currentLine});
+                    @panic("Error Fatal");
+                };
+                return root.VariableValue{ .str = str };
+            },
+            'a'...'z', 'A'...'Z' => {
+                const refVar = this.scopeStack.getLast().variables.get(decl) orelse {
+                    std.log.err("Error on Line {d} - Could not find variable: \"{s}\"", .{ this.currentLine, decl });
+                    return .undefined;
+                };
+                return refVar.value;
+            },
+            '[' => {
+                if (decl[decl.len - 1] != ']') {
+                    @branchHint(.cold);
+                    std.log.err("Error on line: {d} - Invalid Arrray syntax", .{this.currentLine});
+                    @panic("Error Fatal");
+                }
+                return root.VariableValue{
+                    .array = undefined, // TODO: Implement proper Array functionality
+                };
+            },
+            else => {
+                std.log.err("Error on line: {d} - Unknown Variable definition after `=` {s}\n", .{ this.currentLine, decl });
+                @panic("Error Fatal");
+            },
+        }
+    }
 };
 
 const TokenIterator = root.TokenIter;
@@ -99,7 +139,7 @@ pub fn interpret(input: []const u8) !void {
 
         while (tokenIterator.peek() != null) {
             const token = std.meta.stringToEnum(root.Token, tokenIterator.peek().?) orelse {
-                runFn(tokenIterator.next().?, &interpreter, &tokenIterator);
+                Interpreter.determineIfIsFnAndRunIfItIs(tokenIterator.next().?, &interpreter, &tokenIterator);
                 continue;
             };
             _ = tokenIterator.next();
@@ -128,7 +168,21 @@ pub fn interpret(input: []const u8) !void {
                         .parameters = undefined,
                     };
                     _ = func;
-                    //   @panic("done");
+                },
+                .@"const", .@"var" => |v| {
+                    const v2 = std.meta.stringToEnum(root.Token, tokenIterator.next().?) orelse {
+                        std.log.err("Error on line: {d}. Please follow up the {s} declaration with either a const or a var.", .{ interpreter.currentLine, if (v == .@"const") "const" else "var" });
+                        @panic("Fatal Error");
+                    };
+                    const varType: root.VarType = if (v == .@"const" and v2 == .@"const") .const_const else if (v == .@"var" and v2 == .@"var") .var_var else if (v == .@"var" and v2 == .@"const") .var_const else .const_var;
+                    var scope = interpreter.scopeStack.getLast();
+                    const varName = tokenIterator.next().?;
+                    if (tokenIterator.next().?[0] != '=') {
+                        std.log.err("Error on Line: {d}. After a variable declaration a `=` is required but it wasn't provided.", .{interpreter.currentLine});
+                        @panic("Error Fatal");
+                    }
+                    const varVal = interpreter.parseVarDecl(tokenIterator.rest());
+                    try scope.variables.put(varName, root.Variable{ .name = varName, .type = varType, .value = varVal });
                 },
                 else => {},
             }
