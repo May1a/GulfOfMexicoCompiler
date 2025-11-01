@@ -46,6 +46,106 @@ const Interpreter = struct {
     /// parses the variable declaration *after* the `=`
     pub fn parseVarDecl(this: *@This(), decl: []const u8) root.VariableValue {
         switch (decl[0]) {
+            '0'...'9', '-' => {
+                var iter = std.mem.splitAny(u8, decl, " !");
+                var res: ?i32 = null;
+                while (iter.next()) |seq| {
+                    switch (seq[0]) {
+                        '0'...'9' => {
+                            const int = std.fmt.parseInt(i32, seq, 10) catch @panic("Could not parse Int.");
+                            if (res) |_| {
+                                @branchHint(.cold);
+
+                                std.log.err(
+                                    "Error on line: {d} - Invalid syntax => cannot declare to numbers after each other. Did you mean to use an Operator?  {s}\n",
+                                    .{ this.currentLine, decl },
+                                );
+                                @panic("Error Fatal\n");
+                            } else {
+                                res = int;
+                            }
+                        },
+                        '/' => {
+                            const nextInt = std.fmt.parseInt(i32, iter.next().?, 10) catch {
+                                std.log.err("Error on line: {d} - please provide an number after the `{c}` Operator\n", .{ this.currentLine, '/' });
+                                @panic("Error Fatal\n");
+                            };
+                            res = @divTrunc(res orelse {
+                                @branchHint(.cold);
+                                std.log.err(
+                                    "Error on line: {d} - Please provide a number before the usage of the {c} operator.\n",
+                                    .{ this.currentLine, '/' },
+                                );
+                                @panic("Error Fatal\n");
+                            }, nextInt);
+                        },
+
+                        '*' => {
+                            const nextInt = std.fmt.parseInt(i32, iter.next().?, 10) catch {
+                                std.log.err(
+                                    "Error on line: {d} - please provide an number after the `{c}` Operator\n",
+                                    .{ this.currentLine, '/' },
+                                );
+                                @panic("Error Fatal\n");
+                            };
+                            if (res) |_| {
+                                res.? *= nextInt;
+                            } else {
+                                @branchHint(.cold);
+                                std.log.err(
+                                    "Error on line: {d} - Please provide a number before the usage of the {c} operator.\n",
+                                    .{ this.currentLine, '/' },
+                                );
+                                @panic("Error Fatal\n");
+                            }
+                        },
+
+                        '+' => {
+                            const nextInt = std.fmt.parseInt(i32, iter.next().?, 10) catch {
+                                std.log.err(
+                                    "Error on line: {d} - please provide an number after the `{c}` Operator\n",
+                                    .{ this.currentLine, '/' },
+                                );
+                                @panic("Error Fatal\n");
+                            };
+                            if (res) |_| {
+                                res.? += nextInt;
+                            } else {
+                                @branchHint(.cold);
+                                std.log.err(
+                                    "Error on line: {d} - Please provide a number before the usage of the {c} operator.\n",
+                                    .{ this.currentLine, '/' },
+                                );
+                                @panic("Error Fatal\n");
+                            }
+                        },
+                        '-' => {
+                            const nextInt = std.fmt.parseInt(i32, iter.next().?, 10) catch {
+                                std.log.err(
+                                    "Error on line: {d} - please provide an number after the `{c}` Operator\n",
+                                    .{ this.currentLine, '/' },
+                                );
+                                @panic("Error Fatal\n");
+                            };
+                            if (res) |_| {
+                                res.? -= nextInt;
+                            } else {
+                                @branchHint(.cold);
+                                std.log.err(
+                                    "Error on line: {d} - Please provide a number before the usage of the {c} operator.\n",
+                                    .{ this.currentLine, '/' },
+                                );
+                                @panic("Error Fatal\n");
+                            }
+                        },
+                        else => {
+                            std.log.err("Error on line: {d} - Unknown error\n {s} \n", .{ this.currentLine, decl });
+                            @panic("Error Fatal\n");
+                        },
+                    }
+                    return .{ .Int = res.? };
+                }
+            },
             '"' => {
                 const str = parseStr(decl) catch {
                     @branchHint(.cold);
@@ -76,6 +176,7 @@ const Interpreter = struct {
                 @panic("Error Fatal");
             },
         }
+        unreachable;
     }
 };
 
@@ -102,7 +203,6 @@ pub fn runFn(exprStart: []const u8, interpreter: *Interpreter, tokenIter: *Token
     var func = scope.functions.get(exprStart) orelse {
         std.log.err("Function \"{s}\" could not be found.\nError on line {d}", .{ exprStart, interpreter.currentLine });
         return;
-        //  @panic("Fatal exit");
     };
     var i: u16 = 0;
     while (tokenIter.peek() != null and i < func.parameters.len) : (i += 1) {
