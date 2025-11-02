@@ -1,0 +1,10 @@
+
+const const a = 1 + 2!
+
+
+const const b = "Hi"!
+
+print a!
+
+
+print b!
