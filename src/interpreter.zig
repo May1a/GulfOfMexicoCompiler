@@ -12,12 +12,13 @@ const ScopeStack = std.ArrayList(*Scope);
 const Interpreter = struct {
     arena: std.mem.Allocator,
     scopeStack: *ScopeStack,
-    lineIterator: *TokenIterator,
-    currentLine: u32 = 0, // TODO: Fix line counting!
+    lineIterator: *LineIterator,
+    currentLine: u32 = 0,
     baseFunctions: *std.StringArrayHashMap(root.Function),
 
     pub fn nextLine(this: *@This()) ?[]const u8 {
         this.currentLine += 1;
+        std.log.info("Current Line: {d} - {s}", .{ this.currentLine, if (this.lineIterator.peek()) |l| l else return null });
         return this.lineIterator.next();
     }
 
@@ -195,6 +196,7 @@ const Interpreter = struct {
 };
 
 const TokenIterator = root.TokenIter;
+const LineIterator = std.mem.SplitIterator(u8, std.mem.DelimiterType.sequence);
 
 pub fn parseStr(strToParse: []const u8) ![]const u8 {
     var start: ?u16 = null;
@@ -224,27 +226,19 @@ pub fn runFn(exprStart: []const u8, interpreter: *Interpreter, tokenIter: *Token
         switch (token[0]) {
             '"' => {
                 func.parameters[i].value = .{ .str = parseStr(tokenIter.rest()) catch @panic("panic") };
-                _ = tokenIter.next();
             },
             'a'...'z', 'A'...'Z' => {
-                const varName = if (token.len > 0 and token[token.len - 1] == '!')
-                    token[0 .. token.len - 1]
-                else
-                    token;
-                const varVal = scope.variables.get(varName) orelse blk: {
+                const varVal = scope.variables.get(token[0 .. token.len - 2]) orelse blk: {
                     std.log.err("Variable \"{s}\" could not be found.\nError on line {d}\n", .{ token, interpreter.currentLine });
                     break :blk root.Variable{
-                        .name = varName,
+                        .name = token[0 .. token.len - 2],
                         .type = .const_const,
                         .value = .undefined,
                     };
                 };
                 func.parameters[i].value = varVal.value;
-                _ = tokenIter.next();
             },
-            else => {
-                _ = tokenIter.next();
-            },
+            else => {},
         }
     }
     if (std.mem.eql(u8, func.name, "print")) {
@@ -282,7 +276,7 @@ pub fn initPrintFn(this: *Interpreter) !void {
 }
 
 pub fn interpret(input: []const u8) !void {
-    var lineIterator = std.mem.tokenizeAny(u8, input, "\n\r");
+    var lineIterator = std.mem.splitSequence(u8, input, "\n");
     const allocator = std.heap.page_allocator;
     var arenaAllocator = std.heap.ArenaAllocator.init(allocator);
     defer arenaAllocator.deinit();
@@ -329,9 +323,9 @@ pub fn interpret(input: []const u8) !void {
                         }
                     }
 
-                    const bodyStart = lineIterator.index;
+                    const bodyStart = lineIterator.index.?;
                     _ = try interpreter.determineScopeEnd();
-                    const bodyEnd = lineIterator.index;
+                    const bodyEnd = interpreter.lineIterator.index.?;
                     const func = root.Function{
                         .body = interpreter.lineIterator.buffer[bodyStart..bodyEnd],
                         .name = fnName,
