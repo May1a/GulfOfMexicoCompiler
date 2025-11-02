@@ -13,7 +13,7 @@ const Interpreter = struct {
     arena: std.mem.Allocator,
     scopeStack: *ScopeStack,
     lineIterator: *TokenIterator,
-    currentLine: u32 = 0,
+    currentLine: u32 = 0, // TODO: Fix line counting!
     baseFunctions: *std.StringArrayHashMap(root.Function),
 
     pub fn nextLine(this: *@This()) ?[]const u8 {
@@ -184,6 +184,14 @@ const Interpreter = struct {
         }
         unreachable;
     }
+
+    pub fn printAllVars(this: *@This()) void {
+        var scope = this.scopeStack.getLast();
+        for (scope.variables.values()) |v| {
+            const val = v;
+            std.debug.print("variable: name: |{s}|, value: |{any}| as String(|{s}|)\n", .{ val.name, val.value, if (val.value == .str) val.value.str else "@NONE" });
+        }
+    }
 };
 
 const TokenIterator = root.TokenIter;
@@ -197,7 +205,7 @@ pub fn parseStr(strToParse: []const u8) ![]const u8 {
             if (start) |s| {
                 return strToParse[s..i];
             } else {
-                start = i;
+                start = i + 1;
             }
         }
     }
@@ -216,10 +224,61 @@ pub fn runFn(exprStart: []const u8, interpreter: *Interpreter, tokenIter: *Token
         switch (token[0]) {
             '"' => {
                 func.parameters[i].value = .{ .str = parseStr(tokenIter.rest()) catch @panic("panic") };
+                _ = tokenIter.next();
             },
-            else => {},
+            'a'...'z', 'A'...'Z' => {
+                const varName = if (token.len > 0 and token[token.len - 1] == '!')
+                    token[0 .. token.len - 1]
+                else
+                    token;
+                const varVal = scope.variables.get(varName) orelse blk: {
+                    std.log.err("Variable \"{s}\" could not be found.\nError on line {d}\n", .{ token, interpreter.currentLine });
+                    break :blk root.Variable{
+                        .name = varName,
+                        .type = .const_const,
+                        .value = .undefined,
+                    };
+                };
+                func.parameters[i].value = varVal.value;
+                _ = tokenIter.next();
+            },
+            else => {
+                _ = tokenIter.next();
+            },
         }
     }
+    if (std.mem.eql(u8, func.name, "print")) {
+        const param = func.parameters[0];
+        std.debug.print("PRINT: ", .{});
+        switch (param.value) {
+            .Int => |v| {
+                std.debug.print("{d}\n", .{v});
+            },
+            .array => {
+                std.log.warn("Arrays not yet supported!\n", .{}); // TODO: Support arrays
+            },
+            .bool => |v| {
+                std.debug.print("{s}\n", .{if (v) "true" else "false"});
+            },
+            .str => |v| {
+                std.debug.print("{s}\n", .{v});
+            },
+            .undefined => {
+                std.log.warn("Value is undefined of {s}!\n", .{param.name});
+            },
+        }
+    }
+}
+
+pub fn initPrintFn(this: *Interpreter) !void {
+    const argVar = root.Variable{ .name = "print", .type = .const_const, .value = .undefined };
+    var params = [1]root.Variable{argVar};
+    const fun = root.Function{
+        .name = "print",
+        .body = "",
+        .parameters = &params,
+    };
+    try this.baseFunctions.put("print", fun);
 }
 
 pub fn interpret(input: []const u8) !void {
@@ -241,7 +300,9 @@ pub fn interpret(input: []const u8) !void {
         .scopeStack = &scopeStack,
         .baseFunctions = &baseFunctions,
     };
+    try initPrintFn(&interpreter);
     try scopeStack.append(arena, &rootScope);
+    defer interpreter.printAllVars();
     while (interpreter.nextLine()) |currentLine| {
         var tokenIterator = std.mem.tokenizeAny(u8, currentLine, " ()");
 
@@ -253,6 +314,7 @@ pub fn interpret(input: []const u8) !void {
             _ = tokenIterator.next();
             switch (token) {
                 .@"fn", .function => {
+                    const scope = interpreter.scopeStack.getLast();
                     const fnName = tokenIterator.next().?;
                     var args = try std.ArrayList(root.Variable).initCapacity(arena, 1);
                     while (tokenIterator.next()) |nextToken| {
@@ -273,9 +335,9 @@ pub fn interpret(input: []const u8) !void {
                     const func = root.Function{
                         .body = interpreter.lineIterator.buffer[bodyStart..bodyEnd],
                         .name = fnName,
-                        .parameters = undefined,
+                        .parameters = args.items,
                     };
-                    _ = func;
+                    try scope.functions.put(func.name, func);
                 },
                 .@"const", .@"var" => |v| {
                     const v2 = std.meta.stringToEnum(root.Token, tokenIterator.next().?) orelse {
