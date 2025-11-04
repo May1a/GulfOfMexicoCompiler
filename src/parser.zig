@@ -233,6 +233,7 @@ pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
                                     const int = try std.fmt.parseInt(i32, tk[start..i], 10);
                                     try this.numbers.append(this.arena, int);
                                     try tokens.append(this.arena, .{ .line = this.currentLine, .type = .Number });
+                                    if (i > 0) i -= 1;
                                 },
                                 else => try tokens.append(this.arena, .{ .line = this.currentLine, .type = tt }),
                             }
@@ -241,13 +242,14 @@ pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
                             while (i < tk.len and std.ascii.isAlphanumeric(tk[i])) : (i += 1) {}
                             try this.idents.append(this.arena, tk[start..i]);
                             try tokens.append(this.arena, .{ .line = this.currentLine, .type = .Ident });
+                            if (i > 0) i -= 1;
                         }
                     }
                     std.debug.print("\n ^ On line: {d} ^ \n", .{this.currentLine});
                 },
                 else => {},
             }
-            if (tk[tk.len - 1] == '!') {
+            if (tk[tk.len - 1] == '!' and tokens.getLast().type != .Endl) {
                 try tokens.append(this.arena, .{ .line = this.currentLine, .type = .Endl });
             }
         }
