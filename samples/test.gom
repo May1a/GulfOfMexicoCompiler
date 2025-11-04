@@ -1,6 +1,6 @@
-fn fillArr(l, n) => {
-   when( l.len < n ) { 
-      l.push(0)!
+fn fillArr(arr, n) => {
+   when( arr.len < n ) { 
+      arr.push(0)!
    }
 }
 
@@ -24,10 +24,10 @@ fn applyCA(l) => {
    var var index = 0!
    when (index < N-2) {  
       var var total_alive = l[index-1]*4 + l[index]*2 + l[index+1]!
-      if (total_alive==1 | total_alive==3 | total_alive==4 | total_alive==6) {
+      if (total_alive == 1 | total_alive == 3 | total_alive == 4 | total_alive == 6) {
          new_l[index] = 1!
       } 
-      if (total_alive==7 | total_alive==5 | total_alive==2 | total_alive==0) {
+      if (total_alive == 7 | total_alive == 5 | total_alive == 2 | total_alive == 0) {
          new_l[index] = 0!
       }
       index = index + 1!
@@ -39,7 +39,7 @@ fn applyCA(l) => {
    }
 }
 
-const const N = 50!
+const const N = 50! // setting number at 50
 var var counter = 0 - 1 + 1 + 1 + 1!
 const const counter2 = counter!
 const const myStr = "Heyyyyyy!!"!
@@ -49,8 +49,6 @@ fillArr(l, N)!
 dispArr(l)!
 l[N / 2] = 1!
 
-when (counter < N) {
-   dispArr l!
-   applyCA l!
-   counter = counter + 1!
-}
+
+print myStr!
+print(myStr2)!
