@@ -29,8 +29,8 @@ pub fn init(arena: std.mem.Allocator) Parser {
 fn checkChar(char: u8) ?TokenType {
     return switch (char) {
         '0'...'9' => .Number,
-        // charCode 33-47, 58-64 and 91-96
-        '!'...'/', ':'...'@', '['...'`' => |c| blk: {
+        // charCode 33-47, 58-64, 91-94 and 96
+        '!'...'/', ':'...'@', '['...'^', '`' => |c| blk: {
             break :blk switch (c) {
                 '!' => .Endl,
                 '*' => .Mult,
@@ -48,6 +48,7 @@ fn checkChar(char: u8) ?TokenType {
                 '{' => .OpenSquirly,
                 '}' => .CloseSquirly,
                 ';' => .Not,
+                '.' => .NSAccess,
 
                 else => .Illegal,
             };
@@ -90,6 +91,7 @@ const TokenType = enum(u8) {
     Not,
     Mod,
     Comma,
+    NSAccess,
 
     pub fn fromStr(str: []const u8) ?TokenType {
         return TokenMap.get(str);
@@ -239,7 +241,7 @@ pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
                             }
                         } else {
                             const start = i;
-                            while (i < tk.len and std.ascii.isAlphanumeric(tk[i])) : (i += 1) {}
+                            while (i < tk.len and (std.ascii.isAlphanumeric(tk[i]) or tk[i] == '_')) : (i += 1) {}
                             try this.idents.append(this.arena, tk[start..i]);
                             try tokens.append(this.arena, .{ .line = this.currentLine, .type = .Ident });
                             if (i > 0) i -= 1;
