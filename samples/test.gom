@@ -27,7 +27,7 @@ fn applyCA(l) => {
       if (total_alive == 1 | total_alive == 3 | total_alive == 4 | total_alive == 6) {
          new_l[index] = 1!
       } 
-      if (total_alive == 7 | total_alive == 5 | total_alive == 2 | total_alive == 0) {
+      if (total_alive == 7 | total_alive== 5 | total_alive == 2 | total_alive == 0) {
          new_l[index] = 0!
       }
       index = index + 1!

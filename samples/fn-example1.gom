@@ -1,3 +1,5 @@
+const const abc = 2!
+
 fn example(a) => {
    return a!
 } 
