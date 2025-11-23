@@ -2,6 +2,8 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Processor = @This();
 
+const assert = std.debug.assert;
+
 const Parser = @import("parser.zig");
 
 const Value = union(TValue) {
@@ -25,6 +27,7 @@ const Variable = struct {
     value: *Expr,
 };
 
+/// small utility function that can run at comptime to with `srcL(@src())`
 pub inline fn srcL(src: std.builtin.SourceLocation) []const u8 {
     return std.fmt.comptimePrint("{d}", .{src.line});
 }
@@ -51,7 +54,6 @@ const Scope = []AstNode;
 
 const DynNode = ArrayList(AstNode);
 
-/// NOTE: C stands for *const* NOT C
 const ConstStr = []const u8;
 
 const AstNode = union(enum) {
@@ -121,17 +123,16 @@ fn nextToken(this: *Processor, expectedToken: ?Parser.TokenType) !Parser.TokenTy
     return this.source.tokens[this.currentToken].type;
 }
 
-fn peekToken(this: *Processor, expectedtoken: ?Parser.TokenType) !Parser.TokenType {
-    const nextt = try this.nextToken(expectedtoken);
-    this.currentToken -= 1; // fixme: this is not the woy to do it!
-    return nextt;
-}
-fn printAllBefore(this: *Processor, b4: u16) void {
-    if (b4 >= this.source.tokens.len) unreachable;
-    const tidx = this.currentToken;
-    for (0..tidx) |i| {
-        this.printTokenAt(@intCast(i));
+fn peekToken(this: *Processor, expectedToken: ?Parser.TokenType) !Parser.TokenType {
+    const token = this.source.tokens[this.currentToken + 1].type;
+    if (expectedToken) |t| {
+        if (t != token) {
+            @branchHint(.cold);
+            std.log.err("unexpected token: {any}, expected: {any}", .{ this.getTokenAtRelative(1), t });
+            return error.WrongToken;
+        }
     }
+    return token;
 }
 
 fn getCurrentToken(this: *Processor) Parser.Token {
@@ -140,29 +141,30 @@ fn getCurrentToken(this: *Processor) Parser.Token {
 fn getCurrentTokenT(this: *Processor) Parser.TokenType {
     return this.source.tokens[this.currentToken].type;
 }
-fn getTokenAtRelative(this: *Processor, offset: i8) Parser.Token {
-    if (offset == 0) unreachable;
-    if (offset > 0) {
-        const truncoffset: u16 = @intCast(offset);
-        return this.source.tokens[this.currentToken + truncoffset];
-    } else if (offset < 0) {
-        const adjandtruncoffset: u16 = @intCast(offset - offset);
+
+fn getTokenAtRelative(this: *Processor, offsetSigned: i8) Parser.Token {
+    assert(offsetSigned != 0);
+    if (offsetSigned > 0) {
+        const offset: u16 = @intCast(offsetSigned);
+        return this.source.tokens[this.currentToken + offset];
+    } else {
+        const adjandtruncoffset: u16 = @intCast(-offsetSigned);
         return this.source.tokens[this.currentToken - adjandtruncoffset];
     }
-    unreachable;
 }
+
 fn printCurrentToken(this: *Processor) void {
-    const currenttoken = this.getCurrentToken();
-    std.log.info("current token {any} on line: {d}", .{ currenttoken.type, currenttoken.line });
+    const currentToken = this.getCurrentToken();
+    std.log.info("current token {any} on {d}:{d}", .{ currentToken.type, currentToken.line, currentToken.column });
 }
 fn printTokenAt(this: *Processor, i: u16) void {
     const tk = this.source.tokens[i];
-    std.log.info("current token {any} on line: {d}", .{ tk.type, tk.line });
+    std.log.info("current token {any} on line: {d}:{d}", .{ tk.type, tk.line, tk.column });
 }
 
 fn printTokenAtRelative(this: *Processor, offset: i8) void {
-    const currenttoken = this.getTokenAtRelative(offset);
-    std.log.info("current token {any} on line: {d}", .{ currenttoken.type, currenttoken.line });
+    const currentToken = this.getTokenAtRelative(offset);
+    std.log.info("current token {any} on line: {d}:{d}", .{ currentToken.type, currentToken.line, currentToken.column });
 }
 
 /// increments the currenttoken
@@ -171,7 +173,6 @@ fn printTokenAtRelative(this: *Processor, offset: i8) void {
 /// -> void
 fn incrementToken(this: *Processor, expectedToken: ?Parser.TokenType) !void {
     this.currentToken += 1;
-    this.printCurrentToken();
     if (expectedToken) |t| {
         if (t != this.source.tokens[this.currentToken].type) {
             @branchHint(.cold);
@@ -190,12 +191,12 @@ fn computeBExprSimple(a: i32, b: i32, op: Parser.TokenType) i32 {
         .Plus => a + b,
         .Minus => a - b,
         .Mult => a * b,
-        .Div => @divTrunc(a, b),
+        .Div => @divTrunc(a, b), // TODO: Check if this is okay (probably not) but not a priority now
         else => unreachable,
     };
 }
 
-fn computeMathQuickAndDirty(this: *Processor) !Value { // fixme: replace with proper math functionality!
+fn computeMathQuickAndDirty(this: *Processor) !Value { // FIXME: replace with proper math functionality!
     var nums: [2]?i32 = .{ null, null };
     var op: ?Parser.TokenType = null;
     while (this.nextToken(null) catch null) |nt| {
@@ -220,7 +221,7 @@ fn computeMathQuickAndDirty(this: *Processor) !Value { // fixme: replace with pr
                 } else unreachable;
             },
             else => {
-                // todo: check if this works!
+                // TODO: check if this works!
                 return .{ .Int = nums[0].? };
             },
         }
@@ -263,7 +264,7 @@ fn printDiagnostic(this: *Processor, token: Parser.Token) !void {
 fn illegalToken(this: *Processor, token: Parser.Token, calledby: []const u8) noreturn {
     std.log.err("illegal token {any} on line: {d} called by: {s}", .{ token.type, token.line, calledby });
     this.printDiagnostic(token) catch unreachable;
-    unreachable; // todo: make recoverable?
+    unreachable; // TODO: make recoverable?
 }
 
 fn parseFnCallArgs(this: *Processor) anyerror![]Expr {
@@ -392,7 +393,7 @@ fn parseFnArgs(this: *Processor) ![]Variable {
 
     while (this.nextToken(null) catch null) |tk| {
         if (tk == .Arrow) {
-            this.currentToken -= 1; // FIXME: Do this another way
+            this.currentToken -= 1; // TODO: Do this another way??? Or is this fine?
             return params.toOwnedSlice(this.allocator);
         }
         switch (tk) {
@@ -428,6 +429,8 @@ fn tokenIsUnitaryOperator(tk: Parser.TokenType) bool {
 
 fn parseBoolExprUntilDelimiter(this: *Processor, delimiter: Parser.TokenType) ![]BoolExpr {
     var boolExpressions = ArrayList(BoolExpr).empty;
+
+    // FIXME: Consider doing this another way
     while (try this.peekToken(null) != delimiter) {
         var boolExpr: BoolExpr = undefined;
         switch (try this.peekToken(null)) {
