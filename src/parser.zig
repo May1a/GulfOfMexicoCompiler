@@ -7,7 +7,6 @@ const LineIter = std.mem.SplitIterator(u8, std.mem.DelimiterType.scalar);
 
 const Parser = @This();
 
-unit: ParserUnit = .root,
 arena: std.mem.Allocator,
 currentLine: u16 = 1,
 lineIter: LineIter,
@@ -49,6 +48,8 @@ fn checkChar(char: u8) ?TokenType {
                 '}' => .CloseSquirly,
                 ';' => .Not,
                 '.' => .NSAccess,
+                '(' => .OpenB,
+                ')' => .CloseB,
 
                 else => .Illegal,
             };
@@ -57,7 +58,7 @@ fn checkChar(char: u8) ?TokenType {
     };
 }
 
-const TokenType = enum(u8) {
+pub const TokenType = enum(u8) {
     Illegal,
     Const,
     Var,
@@ -92,6 +93,9 @@ const TokenType = enum(u8) {
     Mod,
     Comma,
     NSAccess,
+    Return,
+    OpenB,
+    CloseB,
 
     pub fn fromStr(str: []const u8) ?TokenType {
         return TokenMap.get(str);
@@ -106,6 +110,7 @@ const TokenMap = std.StaticStringMap(TokenType).initComptime(.{
     .{ "<", .LessThan },
     .{ ">=", .MoreThanOrEq },
     .{ "<=", .LessThanOrEq },
+    .{ "return", .Return },
     .{ "%", .Mod },
     .{ "&&", .And },
     .{ "and", .And },
@@ -116,6 +121,8 @@ const TokenMap = std.StaticStringMap(TokenType).initComptime(.{
     .{ "}", .CloseSquirly },
     .{ "[", .OpenSquareB },
     .{ "]", .CloseSquareB },
+    .{ "(", .OpenB },
+    .{ ")", .CloseB },
     .{ ":", .Colon },
     .{ "when", .When },
     .{ "if", .If },
@@ -132,16 +139,12 @@ const TokenMap = std.StaticStringMap(TokenType).initComptime(.{
     .{ ",", .Comma },
 });
 
-const ParsedSource = struct {
+pub const ParsedSource = struct {
     numbers: []const i32,
     strings: [][]const u8,
-    Tokens: []Token,
+    tokens: []Token,
     idents: [][]const u8,
-};
-
-const ParserUnit = union(enum) {
-    root,
-    child: u8,
+    splitIter: *std.mem.SplitIterator(u8, std.mem.DelimiterType.scalar),
 };
 
 pub fn parseStrNoStartingQuote(strToParse: []const u8) ![]const u8 {
@@ -149,6 +152,11 @@ pub fn parseStrNoStartingQuote(strToParse: []const u8) ![]const u8 {
         if (s == '"') return strToParse[0..i];
     }
     return error.noDelemiter;
+}
+
+pub fn parseStrMultiline() ![]const u8 {
+    // TODO:
+    @panic("TODO: Implement multiline parsing for strings!");
 }
 
 pub fn parseStr(strToParse: []const u8) ![]const u8 {
@@ -167,20 +175,26 @@ pub fn parseStr(strToParse: []const u8) ![]const u8 {
     return error.couldNotParseStr;
 }
 
-const Token = struct {
+pub const Token = struct {
     type: TokenType,
     line: u16,
+    column: u16,
 };
 
 pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
     this.lineIter = std.mem.splitScalar(u8, source, '\n');
+    defer this.lineIter.reset();
     var tokens = std.ArrayList(Token).empty;
 
     while (this.lineIter.next()) |line| : (this.currentLine += 1) {
-        var tokenIter = std.mem.tokenizeAny(u8, line, " ()");
+        var tokenIter = std.mem.tokenizeAny(u8, line, " ");
         while (tokenIter.next()) |tk| {
             if (TokenType.fromStr(tk)) |tt| {
-                try tokens.append(this.arena, .{ .type = tt, .line = this.currentLine });
+                try tokens.append(this.arena, .{
+                    .type = tt,
+                    .line = this.currentLine,
+                    .column = @intCast(tokenIter.index),
+                });
                 if (tt == .Comment) break else continue;
             }
 
@@ -191,10 +205,13 @@ pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
                         '0'...'9' => true,
                         else => false,
                     }) : (i += 1) {}
-                    std.log.info("Num to parse: {s}, line: {d} - ctx: {s}", .{ tk[0..i], this.currentLine, tk });
                     const num = std.fmt.parseInt(i32, tk[0..i], 10) catch unreachable;
                     try this.numbers.append(this.arena, num);
-                    try tokens.append(this.arena, .{ .type = .Number, .line = this.currentLine });
+                    try tokens.append(this.arena, .{
+                        .type = .Number,
+                        .line = this.currentLine,
+                        .column = @intCast(tokenIter.index),
+                    });
                 },
                 '"' => {
                     try this.strings.append(this.arena, parseStr(tokenIter.buffer) catch blk: {
@@ -204,12 +221,17 @@ pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
                             @panic("");
                         };
                     });
-                    try tokens.append(this.arena, .{ .type = .String, .line = this.currentLine });
+                    try tokens.append(this.arena, .{
+                        .type = .String,
+                        .line = this.currentLine,
+                        .column = @intCast(tokenIter.index),
+                    });
                     break;
                 },
                 '!' => try tokens.append(this.arena, .{
-                    .line = this.currentLine,
                     .type = .Endl,
+                    .line = this.currentLine,
+                    .column = @intCast(tokenIter.index),
                 }),
                 '/' => {
                     if (tk.len <= 1) {
@@ -226,7 +248,6 @@ pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
                     var i: u16 = 0;
                     while (i < tk.len) : (i += 1) {
                         const currentChar = tk[i];
-                        std.debug.print("|{c}|", .{currentChar});
                         if (checkChar(currentChar)) |tt| {
                             switch (tt) {
                                 .Number => {
@@ -234,32 +255,57 @@ pub fn parse(this: *Parser, source: []const u8) !ParsedSource {
                                     while (i < tk.len and std.ascii.isDigit(tk[i])) : (i += 1) {}
                                     const int = try std.fmt.parseInt(i32, tk[start..i], 10);
                                     try this.numbers.append(this.arena, int);
-                                    try tokens.append(this.arena, .{ .line = this.currentLine, .type = .Number });
+                                    try tokens.append(this.arena, .{
+                                        .type = .Number,
+                                        .line = this.currentLine,
+                                        .column = @intCast(tokenIter.index),
+                                    });
                                     if (i > 0) i -= 1;
                                 },
-                                else => try tokens.append(this.arena, .{ .line = this.currentLine, .type = tt }),
+                                else => try tokens.append(this.arena, .{
+                                    .type = tt,
+                                    .line = this.currentLine,
+                                    .column = @intCast(tokenIter.index),
+                                }),
                             }
                         } else {
                             const start = i;
                             while (i < tk.len and (std.ascii.isAlphanumeric(tk[i]) or tk[i] == '_')) : (i += 1) {}
-                            try this.idents.append(this.arena, tk[start..i]);
-                            try tokens.append(this.arena, .{ .line = this.currentLine, .type = .Ident });
+                            if (TokenMap.get(tk[start..i])) |t| {
+                                try tokens.append(this.arena, .{
+                                    .type = t,
+                                    .line = this.currentLine,
+                                    .column = @intCast(tokenIter.index),
+                                });
+                            } else {
+                                try this.idents.append(this.arena, tk[start..i]);
+                                try tokens.append(this.arena, .{
+                                    .type = .Ident,
+                                    .line = this.currentLine,
+                                    .column = @intCast(tokenIter.index),
+                                });
+                            }
+                            // Not sure why this is here?
                             if (i > 0) i -= 1;
                         }
                     }
-                    std.debug.print("\n ^ On line: {d} ^ \n", .{this.currentLine});
                 },
                 else => {},
             }
             if (tk[tk.len - 1] == '!' and tokens.getLast().type != .Endl) {
-                try tokens.append(this.arena, .{ .line = this.currentLine, .type = .Endl });
+                try tokens.append(this.arena, .{
+                    .type = .Endl,
+                    .line = this.currentLine,
+                    .column = @intCast(tokenIter.index),
+                });
             }
         }
     }
     return .{
-        .Tokens = tokens.items,
+        .tokens = tokens.items,
         .numbers = this.numbers.items,
         .strings = this.strings.items,
         .idents = this.idents.items,
+        .splitIter = &this.lineIter,
     };
 }
