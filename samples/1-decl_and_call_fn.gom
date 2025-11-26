@@ -1,0 +1,6 @@
+fn hi() => {
+   const const a = 1!
+   return a!
+}
+
+const const aaa = hi()!

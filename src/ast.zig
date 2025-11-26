@@ -6,14 +6,14 @@ const assert = std.debug.assert;
 
 const Parser = @import("parser.zig");
 
-const Value = union(TValue) {
+pub const Value = union(TValue) {
     Str: []u8,
     Int: i32,
     Arr: ArrayList(Value),
     Undefined,
 };
 
-const TValue = enum {
+pub const TValue = enum {
     Str,
     Int,
     Arr,
@@ -22,9 +22,13 @@ const TValue = enum {
 
 const none = .{};
 
-const Variable = struct {
+pub const Variable = struct {
     name: []const u8,
     value: *Expr,
+};
+
+pub const Errors = enum {
+    IllegalToken,
 };
 
 /// small utility function that can run at comptime to with `srcL(@src())`
@@ -56,7 +60,7 @@ const DynNode = ArrayList(AstNode);
 
 const ConstStr = []const u8;
 
-const AstNode = union(enum) {
+pub const AstNode = union(enum) {
     varDecl: Variable,
     fun: struct { ident: []const u8, args: ?[]Variable, Scope: *Scope },
     If: struct { cond: []BoolExpr, Scope: *Scope },
@@ -173,6 +177,7 @@ fn printTokenAtRelative(this: *Processor, offset: i8) void {
 /// -> void
 fn incrementToken(this: *Processor, expectedToken: ?Parser.TokenType) !void {
     this.currentToken += 1;
+    if (this.currentToken >= this.source.tokens.len) return error.Idx;
     if (expectedToken) |t| {
         if (t != this.source.tokens[this.currentToken].type) {
             @branchHint(.cold);
@@ -240,8 +245,9 @@ fn printDiagnostic(this: *Processor, token: Parser.Token) !void {
         _ = this.source.splitIter.next();
     }
     const line = this.source.splitIter.next().?;
-
-    try stdoutWriter.interface.print("ERROR:\n", none);
+    const theError = "TODO: Implement error classification";
+    try stdoutWriter.interface.print("ERROR: {s}\n", .{theError});
+    try stdoutWriter.interface.print("In sourceFolder/file.gom:{d}{d}\n", .{ token.line, token.column });
 
     try stdoutWriter.interface.writeAll(line);
     try stdoutWriter.interface.writeByte('\n');
@@ -262,7 +268,7 @@ fn printDiagnostic(this: *Processor, token: Parser.Token) !void {
 }
 
 fn illegalToken(this: *Processor, token: Parser.Token, calledby: []const u8) noreturn {
-    std.log.err("illegal token {any} on line: {d} called by: {s}", .{ token.type, token.line, calledby });
+    std.log.err("illegal token {any} on line: {d}:{d} called by: {s}", .{ token.type, token.line, token.column, calledby });
     this.printDiagnostic(token) catch unreachable;
     unreachable; // TODO: make recoverable?
 }
@@ -284,6 +290,11 @@ fn parseIdent(this: *Processor) !Expr {
     try this.incrementToken(.Ident);
     var expr: Expr = undefined;
     const ident = this.nextIdentV(); // FIXME: Do this a better way!!!
+
+    std.debug.print("CURRENT TKS IN parseIdent!\n", .{});
+    this.printCurrentToken();
+    this.printTokenAtRelative(1);
+    std.debug.print("END!!\n", .{});
 
     switch (try this.peekToken(null)) {
         .OpenB => {
@@ -383,7 +394,8 @@ fn parseVarDecl(this: *Processor) !AstNode {
 
     node.varDecl.value = expr;
     std.log.info("parsed var decl successfully! {any}", .{expr.*});
-    try this.incrementToken(null);
+    this.printCurrentToken();
+
     return node;
 }
 
@@ -540,9 +552,10 @@ fn parseScope(this: *Processor, root: bool) !Scope {
     while (try this.peekToken(null) != .CloseSquirly) : (i += 1) {
         const tk = this.getCurrentTokenT();
         var statement: AstNode = undefined;
-        std.log.info("In statement loop current Token: {any} at line: {d} and idx: {d}", .{
+        std.log.info("In statement loop current Token: {any} at line: {d}:{d} and idx: {d}", .{
             this.getCurrentTokenT(),
             this.getCurrentToken().line,
+            this.getCurrentToken().column,
             this.currentToken,
         });
         switch (tk) {
@@ -573,6 +586,10 @@ fn parseScope(this: *Processor, root: bool) !Scope {
                 try this.incrementToken(null);
                 continue;
             },
+            .CloseSquirly => {
+                //    try this.incrementToken(.CloseSquirly);
+                break;
+            },
             else => {
                 std.log.info("Token idx: {d}, on iter: {d}", .{ this.currentToken, i });
                 this.illegalToken(this.getCurrentToken(), "parseScope — In switch inside of else, line: " ++ srcL(@src()));
@@ -594,13 +611,13 @@ fn parseFn(this: *Processor) anyerror!AstNode {
     try this.incrementToken(.Arrow);
     var scope = try this.parseScope(false);
     node.fun.Scope = &scope;
-    try this.incrementToken(.CloseSquirly);
+
     return node;
 }
 
 pub fn parseRoot(this: *Processor) !AstNode {
-    var rootNode = try this.allocator.create(AstNode);
+    var rootNode: AstNode = .{ .RootNode = undefined };
     var node = try this.parseScope(true);
     rootNode.RootNode = &node;
-    return rootNode.*;
+    return rootNode;
 }

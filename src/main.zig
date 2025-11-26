@@ -3,14 +3,15 @@ const std = @import("std");
 const AST = @import("ast.zig");
 const Parser = @import("parser.zig");
 const zGoM = @import("root.zig");
+const Interpreter = @import("interpreter.zig");
 
-fn printTokens(parsed: []Parser.Token) void {
+fn printTokens(parsed: Parser.ParsedSource) void {
     var identIdx: u16 = 0;
     var numIdx: u16 = 0;
     var strIdx: u16 = 0;
     std.debug.print("All Tokens:\n", .{});
 
-    for (parsed) |t| {
+    for (parsed.tokens) |t| {
         if (t.type == .Ident) {
             std.debug.print("{any} - {s}\n", .{ t, parsed.idents[identIdx] });
             identIdx += 1;
@@ -41,10 +42,13 @@ pub fn main() !void {
     std.debug.print("Contents: {s}\n", .{buffer[0..n]});
     var parser = Parser.init(arena);
     const parsed = try parser.parse(buffer[0..n]);
+    printTokens(parsed);
 
     var ast = AST.init(parsed, arena);
     const parsedRoot = try ast.parseRoot();
     std.debug.print("{any}\n", .{parsedRoot});
+    var interpreter = Interpreter.init(&parsedRoot, allocator);
+    try interpreter.run();
 }
 
 test "Line Counting" {
