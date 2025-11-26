@@ -21,7 +21,7 @@ pub fn run(this: *I) !void {
     // @breakpoint();
     const rNode = this.ast.*.RootNode;
     std.debug.print("HELLO!!!!\n\n", .{});
-    for (rNode.*) |n| {
+    for (rNode) |n| {
         std.debug.print("{any}\n", .{n});
     }
 }

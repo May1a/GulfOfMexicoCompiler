@@ -41,7 +41,7 @@ const Expr = union(enum) {
     // FIXME: Make use of `Expr.Bin` for actual working math!
     Bin: struct { left: *Expr, op: Parser.TokenType, right: *Expr },
     val: Value,
-    FnCall: struct { ident: []const u8, callArgs: ?*[]Expr },
+    FnCall: struct { ident: []const u8, callArgs: ?[]Expr },
     // TODO: Think about a better way to do this
     VarRef: []const u8,
     // FIXME: Do this a better way!!!
@@ -62,11 +62,11 @@ const ConstStr = []const u8;
 
 pub const AstNode = union(enum) {
     varDecl: Variable,
-    fun: struct { ident: []const u8, args: ?[]Variable, Scope: *Scope },
-    If: struct { cond: []BoolExpr, Scope: *Scope },
-    When: struct { cond: []BoolExpr, Scope: *Scope },
+    fun: struct { ident: []const u8, args: ?[]Variable, Scope: Scope },
+    If: struct { cond: []BoolExpr, Scope: Scope },
+    When: struct { cond: []BoolExpr, Scope: Scope },
     Expr: Expr,
-    RootNode: *Scope,
+    RootNode: Scope,
     Return: Expr,
 };
 
@@ -298,9 +298,8 @@ fn parseIdent(this: *Processor) !Expr {
 
     switch (try this.peekToken(null)) {
         .OpenB => {
-            var fnCallArgs = try this.parseFnCallArgs();
-            // FIXME: DON'T have a pointer to the stack!!!
-            expr = .{ .FnCall = .{ .callArgs = &fnCallArgs, .ident = ident } };
+            const fnCallArgs = try this.parseFnCallArgs();
+            expr = .{ .FnCall = .{ .callArgs = fnCallArgs, .ident = ident } };
             return expr;
         },
         .Endl => {
@@ -506,28 +505,22 @@ fn parseBoolExpr(this: *Processor) ![]BoolExpr {
 fn parseWhen(this: *Processor) anyerror!AstNode {
     var node: AstNode = .{ .When = undefined };
 
-    var scopeL = ArrayList(AstNode).empty;
     try this.incrementToken(.OpenB);
     node.When.cond = try this.parseBoolExpr();
     try this.incrementToken(.CloseB);
 
     const scope = try this.parseScope(false);
-    try scopeL.appendSlice(this.allocator, scope);
-
-    node.When.Scope = &scopeL.items;
+    node.When.Scope = scope;
     return node;
 }
 
 fn parseIf(this: *Processor) anyerror!AstNode {
     var node: AstNode = .{ .If = undefined };
 
-    var scopeL = ArrayList(AstNode).empty;
-
     node.If.cond = try this.parseBoolExpr();
     const scope = try this.parseScope(false);
-    try scopeL.appendSlice(this.allocator, scope);
 
-    node.If.Scope = &scopeL.items;
+    node.If.Scope = scope;
     return node;
 }
 
@@ -609,15 +602,15 @@ fn parseFn(this: *Processor) anyerror!AstNode {
     node.fun.ident = this.nextIdentV();
     node.fun.args = if (try this.peekToken(null) == .Arrow) null else try this.parseFnArgs();
     try this.incrementToken(.Arrow);
-    var scope = try this.parseScope(false);
-    node.fun.Scope = &scope;
+    const scope = try this.parseScope(false);
+    node.fun.Scope = scope;
 
     return node;
 }
 
 pub fn parseRoot(this: *Processor) !AstNode {
     var rootNode: AstNode = .{ .RootNode = undefined };
-    var node = try this.parseScope(true);
-    rootNode.RootNode = &node;
+    const node = try this.parseScope(true);
+    rootNode.RootNode = node;
     return rootNode;
 }
